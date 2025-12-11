@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Search,
@@ -15,12 +15,23 @@ import {
   Tag,
   Percent,
   ChevronDown,
+  Pencil,
 } from "lucide-react";
 
 import { DEMO_ITEMS } from "../data/demoItems";
 import { currency } from "../utils/currency";
 
-const CUSTOMERS = [
+const DEFAULT_CUSTOMER = {
+  id: 0,
+  name: "Sin clientes",
+  phone: "",
+  due: 0,
+  partial: null,
+  tickets: [],
+  purchases: [],
+};
+
+const BASE_CUSTOMERS = [
   {
     id: 1,
     name: "Maria Perez",
@@ -166,6 +177,7 @@ const NAV = [
   { key: "clientes", label: "Clientes", icon: Users },
   { key: "productos", label: "Productos", icon: Package },
   { key: "inventario", label: "Inventario", icon: Barcode },
+  { key: "historialVentas", label: "Historial de ventas", icon: FileText },
   { key: "config", label: "Configuración", icon: Settings },
   { key: "facturas", label: "Facturas", icon: FileText },
   { key: "corte", label: "Corte", icon: Scissors },
@@ -193,7 +205,7 @@ const PRODUCT_DEPARTMENTS = [
   "Limpieza",
 ];
 
-const PRODUCT_CATALOG = [
+const BASE_CATALOG = [
   {
     id: "7501059235021",
     name: "Coffee Mate 453g",
@@ -226,22 +238,62 @@ const PRODUCT_CATALOG = [
   },
 ];
 
+const SALES_HISTORY = [
+  {
+    id: "V-0001",
+    date: "2025-08-12",
+    time: "12:30",
+    customer: "Maria Perez",
+    total: 4880,
+    paid: 0,
+    pending: 4880,
+  },
+  {
+    id: "V-0002",
+    date: "2025-08-11",
+    time: "10:10",
+    customer: "Juan Lopez",
+    total: 3490,
+    paid: 3490,
+    pending: 0,
+  },
+  {
+    id: "V-0003",
+    date: "2025-08-10",
+    time: "09:05",
+    customer: "Ana Gonzalez",
+    total: 450,
+    paid: 50,
+    pending: 400,
+  },
+];
+
 export default function POSModerno() {
   const [active, setActive] = useState("ventas");
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState(DEMO_ITEMS);
   const [discount, setDiscount] = useState({ type: "none", value: 0 });
-  const [selectedCustomer, setSelectedCustomer] = useState(CUSTOMERS[0]);
+  const [customers, setCustomers] = useState(BASE_CUSTOMERS);
+  const [selectedCustomer, setSelectedCustomer] = useState(BASE_CUSTOMERS[0] || DEFAULT_CUSTOMER);
   const [payment, setPayment] = useState("");
-  const [customerFocus, setCustomerFocus] = useState(CUSTOMERS[0]);
+  const [customerFocus, setCustomerFocus] = useState(BASE_CUSTOMERS[0] || DEFAULT_CUSTOMER);
   const [openTickets, setOpenTickets] = useState([]);
   const [associateCustomer, setAssociateCustomer] = useState(false);
+  const [catalog, setCatalog] = useState(BASE_CATALOG);
   const [productMode, setProductMode] = useState("nuevo");
-  const [selectedProductId, setSelectedProductId] = useState(PRODUCT_CATALOG[0]?.id ?? "");
+  const [selectedProductId, setSelectedProductId] = useState(BASE_CATALOG[0]?.id ?? "");
   const [inventoryDept, setInventoryDept] = useState("Todos");
   const [lowStockExpanded, setLowStockExpanded] = useState(true);
   const [manualPayments, setManualPayments] = useState({});
   const [manualPaymentInput, setManualPaymentInput] = useState("");
+  const [manualPaymentsHistory, setManualPaymentsHistory] = useState({});
+  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmDeleteCustomer, setConfirmDeleteCustomer] = useState(false);
+  const [salesHistory, setSalesHistory] = useState(SALES_HISTORY);
+  const [editCustomerId, setEditCustomerId] = useState(null);
+  const [editCustomerName, setEditCustomerName] = useState("");
+  const [editCustomerPhone, setEditCustomerPhone] = useState("");
   const [productForm, setProductForm] = useState({
     code: "",
     name: "",
@@ -289,7 +341,11 @@ export default function POSModerno() {
 
   const inc = (idx) =>
     setCart((c) =>
-      c.map((it, i) => (i === idx ? { ...it, qty: it.qty + 1 } : it))
+      c.map((it, i) => {
+        if (i !== idx) return it;
+        if (it.qty >= it.stock) return it; // no incrementar si no hay existencia
+        return { ...it, qty: it.qty + 1 };
+      })
     );
 
   const dec = (idx) =>
@@ -303,7 +359,10 @@ export default function POSModerno() {
 
   const remove = (idx) => setCart((c) => c.filter((_, i) => i !== idx));
 
-  const manualPaid = manualPayments[customerFocus.id] || 0;
+  const manualPaid = (manualPaymentsHistory[customerFocus.id] || []).reduce(
+    (sum, entry) => sum + entry.amount,
+    0
+  );
   const customerPendingAdjusted = Math.max(0, customerPending - manualPaid);
   const ticketSummaryAdjusted = {
     ...ticketSummary,
@@ -313,6 +372,146 @@ export default function POSModerno() {
 
   const adjustedDue = (customer) =>
     Math.max(0, (customer.due || 0) - (manualPayments[customer.id] || 0));
+
+  const handleDeletePayment = (paymentId, clientId) => {
+    setManualPaymentsHistory((prev) => {
+      const list = (prev[clientId] || []).filter((entry) => entry.id !== paymentId);
+      const updated = { ...prev, [clientId]: list };
+      setManualPayments((mp) => ({
+        ...mp,
+        [clientId]: list.reduce((sum, entry) => sum + entry.amount, 0),
+      }));
+      return updated;
+    });
+    setConfirmDelete(null);
+  };
+
+  const handleDeleteCustomer = () => {
+    setCustomers((prev) => {
+      const filtered = prev.filter((c) => c.id !== customerFocus.id);
+      const next = filtered[0] || DEFAULT_CUSTOMER;
+      setCustomerFocus(next);
+      setSelectedCustomer(next);
+      return filtered.length > 0 ? filtered : [DEFAULT_CUSTOMER];
+    });
+    setConfirmDeleteCustomer(false);
+  };
+
+  const startEditCustomer = (customer) => {
+    setEditCustomerId(customer.id);
+    setEditCustomerName(customer.name);
+    setEditCustomerPhone(customer.phone);
+  };
+
+  const cancelEditCustomer = () => {
+    setEditCustomerId(null);
+    setEditCustomerName("");
+    setEditCustomerPhone("");
+  };
+
+  const saveEditCustomer = () => {
+    if (!editCustomerId) return;
+    setCustomers((prev) =>
+      prev.map((c) =>
+        c.id === editCustomerId ? { ...c, name: editCustomerName, phone: editCustomerPhone } : c
+      )
+    );
+    setCustomerFocus((c) =>
+      c.id === editCustomerId ? { ...c, name: editCustomerName, phone: editCustomerPhone } : c
+    );
+    setSelectedCustomer((c) =>
+      c?.id === editCustomerId ? { ...c, name: editCustomerName, phone: editCustomerPhone } : c
+    );
+    cancelEditCustomer();
+  };
+
+  const handleCharge = () => {
+    const paidAmount = Math.max(0, Number(payment) || 0);
+    const pendingAmount = Math.max(0, totals.total - paidAmount);
+    const newId = `V-${String(salesHistory.length + 1).padStart(4, "0")}`;
+    const now = new Date();
+    const entry = {
+      id: newId,
+      date: now.toISOString().slice(0, 10),
+      time: now.toTimeString().slice(0, 5),
+      customer: associateCustomer ? selectedCustomer.name : "Venta sin cliente",
+      total: totals.total,
+      paid: paidAmount,
+      pending: pendingAmount,
+    };
+    setSalesHistory((prev) => [entry, ...prev]);
+    setCart((c) =>
+      c.map((it) => {
+        const remaining = Math.max(0, it.stock - it.qty);
+        return { ...it, stock: remaining, qty: 0 };
+      })
+    );
+    setPayment("");
+  };
+
+  const change = Math.max(0, paid - totals.total);
+  const filteredProducts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return catalog.filter(
+      (p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
+    );
+  }, [query, catalog]);
+
+  const addProductToCart = (product) => {
+    const stockNum = Number(product.stock) || 0;
+    setCart((prev) => {
+      const idx = prev.findIndex((it) => it.code === product.id);
+      if (idx >= 0) {
+        return prev.map((it, i) =>
+          i === idx ? { ...it, qty: Math.min(it.qty + 1, stockNum) } : it
+        );
+      }
+      return [
+        ...prev,
+        {
+          code: product.id,
+          name: product.name,
+          price: Number(product.price) || 0,
+          qty: stockNum > 0 ? 1 : 0,
+          stock: stockNum,
+        },
+      ];
+    });
+    setQuery("");
+  };
+
+  const handleSaveProduct = () => {
+    const code = (productForm.code || "").trim();
+    const name = (productForm.name || "").trim();
+    if (!code || !name) return;
+    const newProduct = {
+      id: code,
+      name,
+      description: productForm.description || "",
+      unit: productForm.unit,
+      department: productForm.department,
+      cost: productForm.cost || "0",
+      price: productForm.price || "0",
+      wholesale: productForm.wholesale || "0",
+      usesInventory: productForm.usesInventory,
+      stock: productForm.stock || "0",
+      min: productForm.min || "0",
+      max: productForm.max || "0",
+      sold: "0",
+    };
+    setCatalog((prev) => {
+      const idx = prev.findIndex((p) => p.id === code);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], ...newProduct };
+        return copy;
+      }
+      return [newProduct, ...prev];
+    });
+    setSelectedProductId(code);
+    setProductMode("modificar");
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex">
@@ -396,8 +595,9 @@ export default function POSModerno() {
             <section className="space-y-3">
               <div className="text-sm text-slate-400 px-1">Listado de clientes</div>
               <div className="bg-slate-900/60 border border-slate-800 rounded-2xl divide-y divide-slate-800">
-                {CUSTOMERS.map((c) => {
+                {customers.map((c) => {
                   const isActiveCustomer = customerFocus.id === c.id;
+                  const isEditing = editCustomerId === c.id;
                   return (
                     <button
                       key={c.id}
@@ -409,12 +609,61 @@ export default function POSModerno() {
                           : "hover:bg-slate-800/40 text-slate-200")
                       }
                     >
+                      {!isEditing && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditCustomer(c);
+                          }}
+                          className="h-8 w-8 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 flex items-center justify-center"
+                          title="Editar cliente"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                      )}
                       <div className="h-9 w-9 rounded-full bg-slate-800 flex items-center justify-center text-xs font-semibold">
                         {c.name.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="flex-1">
-                        <div className="font-semibold text-sm">{c.name}</div>
-                        <div className="text-xs text-slate-400">{c.phone}</div>
+                        {isEditing ? (
+                          <div className="space-y-1">
+                            <input
+                              value={editCustomerName}
+                              onChange={(e) => setEditCustomerName(e.target.value)}
+                              className="w-full h-8 bg-slate-900 border border-slate-700 rounded px-2 text-xs text-slate-50"
+                            />
+                            <input
+                              value={editCustomerPhone}
+                              onChange={(e) => setEditCustomerPhone(e.target.value)}
+                              className="w-full h-8 bg-slate-900 border border-slate-700 rounded px-2 text-xs text-slate-50"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  saveEditCustomer();
+                                }}
+                                className="px-2 py-1 rounded bg-emerald-500 text-slate-900 text-xs font-semibold"
+                              >
+                                Guardar
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  cancelEditCustomer();
+                                }}
+                                className="px-2 py-1 rounded border border-slate-700 text-xs text-slate-200"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="font-semibold text-sm">{c.name}</div>
+                            <div className="text-xs text-slate-400">{c.phone}</div>
+                          </>
+                        )}
                       </div>
                       <div className="text-right text-sm">
                         <div className="text-slate-400">Saldo</div>
@@ -440,6 +689,36 @@ export default function POSModerno() {
                 <div>
                   <div className="text-lg font-semibold">{customerFocus.name}</div>
                   <div className="text-sm text-slate-400">{customerFocus.phone}</div>
+                </div>
+                <div className="flex flex-wrap gap-2 ml-auto">
+                  <button
+                    onClick={() => setShowPaymentHistory(false)}
+                    className={
+                      "h-10 px-3 rounded-lg border text-xs " +
+                      (!showPaymentHistory
+                        ? "border-emerald-700 bg-emerald-500/20 text-emerald-100"
+                        : "border-slate-800 bg-slate-900/60 text-slate-200 hover:bg-slate-800")
+                    }
+                  >
+                    Tickets
+                  </button>
+                  <button
+                    onClick={() => setShowPaymentHistory((v) => !v)}
+                    className={
+                      "h-10 px-3 rounded-lg border text-xs transition " +
+                      (showPaymentHistory
+                        ? "border-emerald-700 bg-emerald-500/20 text-emerald-100"
+                        : "border-slate-800 bg-slate-900/60 text-slate-200 hover:bg-slate-800")
+                    }
+                  >
+                    Historial de pagos
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteCustomer(true)}
+                    className="h-10 px-3 rounded-lg border text-xs transition border-slate-800 bg-slate-900/60 text-slate-200 hover:bg-rose-700/30 hover:border-rose-800 hover:text-rose-100"
+                  >
+                    Eliminar cliente
+                  </button>
                 </div>
               </div>
 
@@ -485,98 +764,143 @@ export default function POSModerno() {
               <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-3">
                 <div className="bg-slate-950/40 border border-slate-800 rounded-xl overflow-hidden">
                   <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-                    <div className="text-sm font-semibold text-slate-100">Tickets por compra</div>
+                    <div className="text-sm font-semibold text-slate-100">
+                      {showPaymentHistory ? "Historial de pagos" : "Tickets por compra"}
+                    </div>
                     <div className="text-xs text-slate-400">
-                      {customerFocus.tickets?.length ?? 0} registros
+                      {showPaymentHistory
+                        ? (manualPaymentsHistory[customerFocus.id] || []).length + " registros"
+                        : (customerFocus.tickets?.length ?? 0) + " registros"}
                     </div>
                   </div>
-                  <div className="divide-y divide-slate-800">
-                    {customerFocus.tickets?.map((t, idx) => {
-                      const paid = Math.min(t.paid, t.total);
-                      const pending = Math.max(0, t.total - t.paid);
-                      const isOpen = openTickets.includes(t.id);
-                      const accent = TICKET_ACCENTS[idx % TICKET_ACCENTS.length];
-                      const toggle = () =>
-                        setOpenTickets((prev) =>
-                          prev.includes(t.id) ? prev.filter((i) => i !== t.id) : [...prev, t.id]
-                        );
-                      return (
+
+                  {showPaymentHistory ? (
+                    <div className="divide-y divide-slate-800">
+                      {(manualPaymentsHistory[customerFocus.id] || []).length === 0 && (
+                        <div className="px-4 py-6 text-center text-slate-500 text-sm">
+                          Sin pagos registrados.
+                        </div>
+                      )}
+                      {(manualPaymentsHistory[customerFocus.id] || []).map((p) => (
                         <div
-                          key={t.id}
-                          className={
-                            "px-4 py-4 space-y-3 text-sm rounded-xl border bg-slate-950/40 " +
-                            accent.border +
-                            " " +
-                            accent.glow
-                          }
+                          key={p.id}
+                          className="px-4 py-3 grid grid-cols-[1fr_auto] items-center text-sm gap-3"
                         >
-                          <button
-                            onClick={toggle}
-                            className="w-full flex items-center gap-3 text-left hover:bg-slate-900/40 rounded-lg p-3 transition"
-                          >
-                            <div className="flex-1 flex items-start justify-between gap-3">
-                              <div>
-                            <div className="text-xs text-slate-400">Ticket</div>
-                            <div className="text-base font-semibold text-slate-100">
-                              {t.id}
+                          <div>
+                            <div className="font-semibold tabular-nums text-slate-100">
+                              {currency(p.amount)}
                             </div>
                             <div className="text-xs text-slate-500">
-                              Fecha {t.date} · Hora {t.time}
+                              {p.date} · {p.time} · Manual
                             </div>
                           </div>
-                              <div className="text-right">
-                      <div className="text-xs text-slate-400">Total</div>
-                      <div className="text-lg font-semibold tabular-nums">
-                        {currency(t.total)}
-                      </div>
-                      <div className="flex gap-2 mt-2 text-xs">
-                        <span className="px-2 py-1 rounded-full bg-emerald-500/15 border border-emerald-900/50 text-emerald-200 tabular-nums">
-                                  Pagado {currency(paid)}
-                        </span>
-                        <span className="px-2 py-1 rounded-full bg-amber-500/15 border border-amber-900/40 text-amber-200 tabular-nums">
-                          Pendiente {currency(pending)}
-                        </span>
-                      </div>
-                              </div>
-                            </div>
-                            <ChevronDown
-                              className={
-                                "h-5 w-5 text-slate-400 transition-transform " +
-                                (isOpen ? "rotate-180" : "")
-                              }
-                            />
+                          <button
+                            onClick={() =>
+                              setConfirmDelete({
+                                id: p.id,
+                                clientId: customerFocus.id,
+                                amount: p.amount,
+                                date: p.date,
+                                time: p.time,
+                              })
+                            }
+                            className="h-9 w-9 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-300 hover:bg-slate-800 hover:text-rose-200 flex items-center justify-center"
+                            title="Eliminar pago"
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </button>
-
-                          {isOpen && (
-                            <div className="bg-slate-950/30 border border-slate-800 rounded-lg p-3">
-                              <div className="text-xs text-slate-400 mb-2">Productos</div>
-                              <div className="space-y-1">
-                                {(t.products || []).map((p, idx) => {
-                                  const unit = p.qty ? p.total / p.qty : p.total;
-                                  return (
-                                    <div
-                                      key={idx}
-                                      className="flex items-center justify-between text-xs text-slate-300"
-                                    >
-                                      <div className="flex flex-col">
-                                        <span className="font-semibold text-slate-100">{p.name}</span>
-                                        <span className="text-slate-500">
-                                          x{p.qty} · {currency(unit)} c/u
-                                        </span>
-                                      </div>
-                                      <div className="tabular-nums font-semibold">
-                                        {currency(p.total)}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
                         </div>
-                      );
-                    })}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-800">
+                      {customerFocus.tickets?.map((t, idx) => {
+                        const paid = Math.min(t.paid, t.total);
+                        const pending = Math.max(0, t.total - t.paid);
+                        const isOpen = openTickets.includes(t.id);
+                        const accent = TICKET_ACCENTS[idx % TICKET_ACCENTS.length];
+                        const toggle = () =>
+                          setOpenTickets((prev) =>
+                            prev.includes(t.id) ? prev.filter((i) => i !== t.id) : [...prev, t.id]
+                          );
+                        return (
+                          <div
+                            key={t.id}
+                            className={
+                              "px-4 py-4 space-y-3 text-sm rounded-xl border bg-slate-950/40 " +
+                              accent.border +
+                              " " +
+                              accent.glow
+                            }
+                          >
+                            <button
+                              onClick={toggle}
+                              className="w-full flex items-center gap-3 text-left hover:bg-slate-900/40 rounded-lg p-3 transition"
+                            >
+                              <div className="flex-1 flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-xs text-slate-400">Ticket</div>
+                                  <div className="text-base font-semibold text-slate-100">
+                                    {t.id}
+                                  </div>
+                                  <div className="text-xs text-slate-500">
+                                    Fecha {t.date} · Hora {t.time}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-xs text-slate-400">Total</div>
+                                  <div className="text-lg font-semibold tabular-nums">
+                                    {currency(t.total)}
+                                  </div>
+                                  <div className="flex gap-2 mt-2 text-xs">
+                                    <span className="px-2 py-1 rounded-full bg-emerald-500/15 border border-emerald-900/50 text-emerald-200 tabular-nums">
+                                    Pagado {currency(paid)}
+                                    </span>
+                                    <span className="px-2 py-1 rounded-full bg-amber-500/15 border border-amber-900/40 text-amber-200 tabular-nums">
+                                    Pendiente {currency(pending)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <ChevronDown
+                                className={
+                                  "h-5 w-5 text-slate-400 transition-transform " +
+                                  (isOpen ? "rotate-180" : "")
+                                }
+                              />
+                            </button>
+
+                            {isOpen && (
+                              <div className="bg-slate-950/30 border border-slate-800 rounded-lg p-3">
+                                <div className="text-xs text-slate-400 mb-2">Productos</div>
+                                <div className="space-y-1">
+                                  {(t.products || []).map((p, idx) => {
+                                    const unit = p.qty ? p.total / p.qty : p.total;
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className="flex items-center justify-between text-xs text-slate-300"
+                                      >
+                                        <div className="flex flex-col">
+                                          <span className="font-semibold text-slate-100">{p.name}</span>
+                                          <span className="text-slate-500">
+                                            x{p.qty} · {currency(unit)} c/u
+                                          </span>
+                                        </div>
+                                        <div className="tabular-nums font-semibold">
+                                          {currency(p.total)}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-4 space-y-3">
@@ -620,9 +944,19 @@ export default function POSModerno() {
                         onClick={() => {
                           const amt = Math.max(0, Number(manualPaymentInput) || 0);
                           if (amt <= 0) return;
+                          const entry = {
+                            id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+                            amount: amt,
+                            date: new Date().toISOString().slice(0, 10),
+                            time: new Date().toTimeString().slice(0, 5),
+                          };
                           setManualPayments((mp) => ({
                             ...mp,
                             [customerFocus.id]: (mp[customerFocus.id] || 0) + amt,
+                          }));
+                          setManualPaymentsHistory((hist) => ({
+                            ...hist,
+                            [customerFocus.id]: [...(hist[customerFocus.id] || []), entry],
                           }));
                           setManualPaymentInput("");
                         }}
@@ -630,11 +964,15 @@ export default function POSModerno() {
                       >
                         Registrar pago
                       </button>
-                    </div>
+                  </div>
                   </div>
                 </div>
               </div>
             </section>
+          </div>
+        ) : active === "historialVentas" ? (
+          <div className="flex-1 p-4">
+            <SalesHistoryList sales={salesHistory} />
           </div>
         ) : active === "productos" ? (
           <div className="flex-1 grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4 p-4">
@@ -670,8 +1008,8 @@ export default function POSModerno() {
                   <button
                     onClick={() => {
                       setProductMode("modificar");
-                      if (PRODUCT_CATALOG.length > 0) {
-                        const p = PRODUCT_CATALOG.find((pr) => pr.id === selectedProductId) || PRODUCT_CATALOG[0];
+                      if (catalog.length > 0) {
+                        const p = catalog.find((pr) => pr.id === selectedProductId) || catalog[0];
                         setSelectedProductId(p.id);
                         setProductForm({
                           code: p.id,
@@ -714,14 +1052,14 @@ export default function POSModerno() {
                     <SelectField
                       label="Selecciona producto a editar"
                       value={selectedProductId}
-                      options={PRODUCT_CATALOG.map((p) => ({
+                      options={catalog.map((p) => ({
                         value: p.id,
                         label: `${p.id} · ${p.name}`,
                       }))}
                       onChange={(e) => {
                         const id = e.target.value;
                         setSelectedProductId(id);
-                        const p = PRODUCT_CATALOG.find((pr) => pr.id === id);
+                        const p = catalog.find((pr) => pr.id === id);
                         if (p) {
                           setProductForm({
                             code: p.id,
@@ -817,7 +1155,10 @@ export default function POSModerno() {
                   <button className="px-4 py-2 rounded-xl border border-slate-700 text-sm text-slate-200 hover:bg-slate-800">
                     Cancelar
                   </button>
-                  <button className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm shadow-lg shadow-emerald-500/20">
+                  <button
+                    onClick={handleSaveProduct}
+                    className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm shadow-lg shadow-emerald-500/20"
+                  >
                     Guardar producto
                   </button>
                 </div>
@@ -880,7 +1221,7 @@ export default function POSModerno() {
 
             {(() => {
               const parse = (v) => Number(v) || 0;
-              const rows = PRODUCT_CATALOG.filter(
+              const rows = catalog.filter(
                 (p) => inventoryDept === "Todos" || p.department === inventoryDept
               );
               const totals = rows.reduce(
@@ -1030,8 +1371,34 @@ export default function POSModerno() {
                     placeholder="Escanea o escribe codigo / nombre del producto"
                     className="w-full h-12 bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-28 text-sm outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10"
                   />
+                  {query.trim() && filteredProducts.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-800 rounded-xl shadow-xl z-10 max-h-64 overflow-auto">
+                      {filteredProducts.slice(0, 6).map((p) => (
+                        <button
+                          key={p.id}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => addProductToCart(p)}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center gap-3"
+                        >
+                          <div className="font-mono text-xs text-slate-400">{p.id}</div>
+                          <div className="flex-1">
+                            <div className="text-sm font-semibold text-slate-100">{p.name}</div>
+                            <div className="text-xs text-slate-500">{p.department}</div>
+                          </div>
+                          <div className="text-right text-xs text-slate-300">
+                            Stock {Number(p.stock) || 0}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
-                    <button className="h-9 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        if (filteredProducts[0]) addProductToCart(filteredProducts[0]);
+                      }}
+                      className="h-9 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs flex items-center gap-2"
+                    >
                       <Barcode className="h-4 w-4" />
                       Buscar
                     </button>
@@ -1064,7 +1431,7 @@ export default function POSModerno() {
               <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
                 <div className="grid grid-cols-[160px_1fr_120px_140px_120px_120px_44px] text-xs uppercase tracking-wide text-slate-400 bg-slate-950/40 border-b border-slate-800 px-3 py-2">
                   <div>Codigo</div>
-                  <div>Descripcion</div>
+                <div>Articulo</div>
                   <div className="text-right">Precio</div>
                   <div className="text-center">Cantidad</div>
                   <div className="text-right">Importe</div>
@@ -1117,7 +1484,7 @@ export default function POSModerno() {
                         {currency(it.price * it.qty)}
                       </div>
                       <div className="text-right tabular-nums text-slate-300">
-                        {it.stock}
+                        {Math.max(0, it.stock - it.qty)}
                       </div>
                       <button
                         onClick={() => remove(idx)}
@@ -1131,11 +1498,11 @@ export default function POSModerno() {
                 </div>
               </div>
 
-            {/* Cliente para saldo pendiente */}
-            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-slate-100">
-                  Cliente para saldo pendiente
+              {/* Cliente para saldo pendiente */}
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-slate-100">
+                    Cliente para saldo pendiente
                 </div>
                 <label className="flex items-center gap-2 text-xs text-slate-300">
                   <input
@@ -1149,41 +1516,40 @@ export default function POSModerno() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-[1fr_160px] gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-400">Selecciona cliente</label>
-                  <select
-                    value={selectedCustomer.id}
-                    disabled={!associateCustomer || due <= 0}
-                    onChange={(e) =>
-                      setSelectedCustomer(
-                        CUSTOMERS.find((c) => c.id === Number(e.target.value)) || CUSTOMERS[0]
-                      )
-                    }
-                    className={
-                      "h-11 bg-slate-950/40 border rounded-xl px-3 text-sm text-slate-50 outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10 " +
-                      (associateCustomer && due > 0 ? "border-slate-800" : "border-slate-800/50 text-slate-500")
-                    }
-                  >
-                    {CUSTOMERS.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} - {c.phone}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-slate-400">Selecciona cliente</label>
+                    <select
+                      value={selectedCustomer?.id ?? ""}
+                      onChange={(e) =>
+                        setSelectedCustomer(
+                          customers.find((c) => c.id === Number(e.target.value)) ||
+                          customers[0] ||
+                          DEFAULT_CUSTOMER
+                        )
+                      }
+                      className="h-11 bg-slate-950/40 border border-slate-800 rounded-xl px-3 text-sm text-slate-50 outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10"
+                    >
+                      {customers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} - {c.phone}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-400">Saldo pendiente</label>
-                  <div className="h-11 flex items-center px-3 rounded-xl bg-slate-950/40 border border-slate-800 text-sm tabular-nums">
-                    {due > 0 ? currency(due) : "Pago completo"}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-slate-400">Saldo pendiente</label>
+                    <div className="h-11 flex items-center px-3 rounded-xl bg-slate-950/40 border border-slate-800 text-sm tabular-nums">
+                      {associateCustomer ? (due > 0 ? currency(due) : "Pago completo") : "—"}
+                    </div>
                   </div>
                 </div>
+
+                <p className="text-xs text-slate-400">
+                  Activa "Asociar cliente" y asegúrate de que exista saldo pendiente para registrar a {selectedCustomer.name}. Si no, la venta quedará sin cliente asociado.
+                </p>
               </div>
 
-              <p className="text-xs text-slate-400">
-                Si activas la asociación y hay saldo pendiente, se registrará a {selectedCustomer.name}. Si no, la venta quedará sin cliente asociado.
-              </p>
-            </div>
             </section>
 
             {/* Right side: totals + payment */}
@@ -1283,19 +1649,28 @@ export default function POSModerno() {
                   <PayChip label="Transfer." />
                 </div>
 
-                <label className="text-xs text-slate-400 mt-2">Recibido</label>
-                <input
-                  value={payment}
-                  onChange={(e) => setPayment(e.target.value)}
-                  placeholder="0"
-                  className="w-full h-11 bg-slate-950/40 border border-slate-800 rounded-xl px-3 text-sm outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10"
-                />
+              <label className="text-xs text-slate-400 mt-2">Recibido</label>
+              <input
+                value={payment}
+                onChange={(e) => setPayment(e.target.value)}
+                placeholder="0"
+                className="w-full h-11 bg-slate-950/40 border border-slate-800 rounded-xl px-3 text-sm outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10"
+              />
+              <div className="flex items-center justify-between text-sm text-slate-300">
+                <span>Vuelto</span>
+                <span className="tabular-nums font-semibold text-emerald-200">
+                  {currency(change)}
+                </span>
+              </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <button className="h-12 rounded-xl bg-slate-950/40 hover:bg-slate-900 border border-slate-800 text-sm">
                     Guardar pendiente
                   </button>
-                  <button className="h-12 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm shadow-lg shadow-emerald-500/20">
+                  <button
+                    onClick={handleCharge}
+                    className="h-12 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm shadow-lg shadow-emerald-500/20"
+                  >
                     Cobrar (F12)
                   </button>
                 </div>
@@ -1318,6 +1693,62 @@ export default function POSModerno() {
           </div>
         )}
       </main>
+
+      {confirmDeleteCustomer && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-[320px] shadow-xl shadow-black/40 space-y-4">
+            <div className="text-lg font-semibold text-slate-100">
+              ¿Está seguro de eliminar cliente?
+            </div>
+            <div className="text-sm text-slate-400">
+              {customerFocus.name} · {customerFocus.phone || "Sin teléfono"}
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmDeleteCustomer(false)}
+                className="px-4 py-2 rounded-lg border border-slate-700 text-sm text-slate-200 hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteCustomer}
+                className="px-4 py-2 rounded-lg bg-rose-500 hover:bg-rose-400 text-slate-900 text-sm font-semibold"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-[320px] shadow-xl shadow-black/40 space-y-4">
+            <div className="text-lg font-semibold text-slate-100">
+              ¿Está seguro de eliminar este pago?
+            </div>
+            <div className="text-sm text-slate-400">
+              Monto: <span className="text-slate-100 tabular-nums">{currency(confirmDelete.amount)}</span>
+              <br />
+              Fecha: {confirmDelete.date} · Hora: {confirmDelete.time}
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="px-4 py-2 rounded-lg border border-slate-700 text-sm text-slate-200 hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleDeletePayment(confirmDelete.id, confirmDelete.clientId)}
+                className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-sm font-semibold"
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1389,4 +1820,41 @@ function SelectField({ label, value, options, onChange }) {
 
 function MoneyField(props) {
   return <Field {...props} type="number" />;
+}
+
+function SalesHistoryList({ sales }) {
+  return (
+    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+        <div className="text-sm font-semibold text-slate-100">Historial de ventas</div>
+        <div className="text-xs text-slate-400">{sales.length} registros</div>
+      </div>
+      <div className="divide-y divide-slate-800 max-h-80 overflow-y-auto pr-1 sales-scroll">
+        {sales.map((s) => (
+          <div key={s.id} className="px-4 py-3 grid grid-cols-[100px_1fr_120px] items-center text-sm">
+            <div className="font-mono text-xs text-slate-400">{s.id}</div>
+            <div>
+              <div className="font-semibold text-slate-100">
+                {s.customer || "Venta sin cliente"}
+              </div>
+              <div className="text-xs text-slate-500">
+                {s.date} · {s.time}
+              </div>
+            </div>
+            <div className="text-right space-y-1">
+              <div className="text-slate-100 font-semibold tabular-nums">
+                {currency(s.total)}
+              </div>
+              <div className="text-xs text-emerald-200 tabular-nums">
+                Pagado {currency(s.paid)}
+              </div>
+              <div className="text-xs text-amber-200 tabular-nums">
+                Pendiente {currency(s.pending)}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

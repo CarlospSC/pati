@@ -13,3 +13,19 @@ body {
   min-height: 100vh;
   background-color: #020617;
 }
+
+/* Scrollbar styling for sales history */
+.sales-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.sales-scroll::-webkit-scrollbar-track {
+  background: #0b1224;
+  border-radius: 999px;
+}
+.sales-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #0ea5e9 0%, #10b981 100%);
+  border-radius: 999px;
+}
+.sales-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #22d3ee 0%, #34d399 100%);
+}
